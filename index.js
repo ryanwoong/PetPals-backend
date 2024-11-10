@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, addDoc, doc, setDoc } from 'firebase/firestore';
 import 'dotenv/config'
 import express from "express";
+import cors from "cors";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
 import { userConverter, User } from './classes/User.js';
 import { Pet, petConverter } from './classes/Pet.js';
@@ -29,6 +30,7 @@ const appDB = initializeApp(firebaseConfig);
 const db = getFirestore(appDB);
 const auth = getAuth(appDB);
 app.use(express.json());
+app.use(cors());
 
 app.post('/register', async (req, res) => {
     try {
