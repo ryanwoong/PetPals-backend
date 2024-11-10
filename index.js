@@ -43,54 +43,44 @@ app.post('/register', async (req, res) => {
     try {
         const auth = getAuth();
         const db = getFirestore();
-        // console.log(req.body);
-        let username = req.body.username;
-        let coins = req.body.coins;
-        let email = req.body.email;
-        let level = req.body.level;
-        let uid = req.body.uid;
-        let xp = req.body.xp;
+        
+        // Validate required fields
+        const requiredFields = ['username', 'email', 'uid'];
+        for (const field of requiredFields) {
+            if (!req.body[field]) {
+                return res.status(400).json({
+                    error: 'Missing required field',
+                    field: field,
+                    message: `${field} is required for registration`
+                });
+            }
+        }
 
-        // Step 2: Create user document in Firestore
+        // Extract user data with defaults
+        const {
+            username,
+            email,
+            uid,
+            coins = 0,
+            level = 1,
+            xp = 0,
+            agreed = false
+        } = req.body;
+
+        // Create new user
         const newUser = new User(username, coins, email, level, uid, xp);
+        newUser.agreed = agreed;
+
+        // Create user document with converter
         const userRef = doc(db, 'users', uid).withConverter(userConverter);
         await setDoc(userRef, newUser);
 
-        // Step 3: Create collections
-        const petsCollectionRef = collection(userRef, 'pets').withConverter(petConverter);
-        const postsCollectionRef = collection(userRef, 'posts').withConverter(postConverter);
+        // Create the inventory collection
         const inventoryCollectionRef = collection(userRef, 'inventory').withConverter(inventoryConverter);
 
-        // Create the starter inventory item
-        const starterItem = new Inventory("egyc7nx9JjsUYlvK4OF6", 1); // ID and quantity
+        // Add starter inventory item
+        const starterItem = new Inventory("egyc7nx9JjsUYlvK4OF6", 1);
         await addDoc(inventoryCollectionRef, starterItem);
-
-        await Promise.all([
-            // Create pets and their items
-            ...petsData.map(async (petData) => {
-                const pet = new Pet(
-                    petData.id,
-                    petData.level,
-                    petData.name,
-                    petData.type,
-                    petData.xp
-                );
-                const petRef = await addDoc(petsCollectionRef, pet);
-            }),
-
-            // Create posts if needed
-            ...(postsData || []).map(async (postData) => {
-                const post = new Post(
-                    postData.id,
-                    postData.author,
-                    postData.body,
-                    postData.dateCreated,
-                    postData.tags,
-                    postData.isPublic
-                );
-                await addDoc(postsCollectionRef, post);
-            })
-        ]);
 
         // Return success response
         res.status(201).json({
@@ -98,13 +88,14 @@ app.post('/register', async (req, res) => {
             uid: uid,
             user: newUser
         });
+
     } catch (error) {
         console.error('Registration error:', error);
         
-        // Handle specific Firebase Auth errors
         const errorCode = error.code;
         let errorMessage = 'Registration failed';
         
+        // Handle specific Firebase Auth errors
         switch (errorCode) {
             case 'auth/email-already-in-use':
                 errorMessage = 'Email is already registered';
@@ -121,6 +112,7 @@ app.post('/register', async (req, res) => {
             default:
                 errorMessage = error.message;
         }
+
         res.status(400).json({
             error: errorMessage,
             code: errorCode
@@ -238,97 +230,6 @@ app.post('/checkComment', async (req, res) => {
 });
 
 
-// ########################################################################################
-
-// get info from Items collection
-async function getItems (db) {
-    const itemsCol = collection(db, 'items');
-    const itemsSnapshot = await getDocs(itemsCol)
-    const itemsList = itemsSnapshot.docs.map(doc => doc.data());
-
-    return itemsList;
-}
-
-// get info from users collection
-async function getUsers (db) {
-    const usersCol = collection(db, 'users');
-    const usersSnapshot = await getDocs(usersCol)
-    const usersList = usersSnapshot.docs.map(doc => doc.data());
-
-    return usersList;
-}
-
-// get info from users/pets collection
-async function getUserPets (db) {
-    const userCollection = collection(db, 'users');
-    const userSnapshot = await getDocs(userCollection);
-
-    const object = new Object();
-
-
-    const userPetsList = await Promise.all(
-        userSnapshot.docs.map(async (userDoc) => {
-            const petsCollection = collection(userDoc.ref, 'pets'); 
-            const petsSnapshot = await getDocs(petsCollection);
-            const petsList = petsSnapshot.docs.map(petDoc => petDoc.data());
-            
-            object.userDoc = userDoc.id
-            object.pets = petsList
-        })
-    );
-    return object;
-}
-
-// get info from users/posts collection
-async function getUserPosts (db) {
-    const userCollection = collection(db, 'users');
-    const userSnapshot = await getDocs(userCollection);
-
-    const object = new Object();
-
-
-    const userPetsList = await Promise.all(
-        userSnapshot.docs.map(async (userDoc) => {
-            const postsCollection = collection(userDoc.ref, 'posts');
-            const postsSnapshot = await getDocs(postsCollection);
-            const postsList = postsSnapshot.docs.map(postDoc => postDoc.data());
-            
-            object.userDoc = userDoc.id
-            object.posts = postsList
-        })
-    );
-    return object;
-}
-
-//get info from user/pets/items collection
-async function getUserPetItems (db) {
-    const userCollection = collection(db, 'users');
-    const userSnapshot = await getDocs(userCollection);
-
-    const object = new Object();
-
-    const userPetItemsList = await Promise.all(
-        userSnapshot.docs.map(async (userDoc) => {
-            const petsCollection = collection(userDoc.ref, 'pets');
-            const petsSnapshot = await getDocs(petsCollection);
-    
-            const petsList = await Promise.all(
-                petsSnapshot.docs.map(async (petDoc) => {
-                    const petItemsCollection = collection(petDoc.ref, 'items');
-                    const petItemsSnapshot = await getDocs(petItemsCollection);
-                    
-                    const petItemsList = petItemsSnapshot.docs.map(petItems => petItems.data());
-    
-                    object.userId = userDoc.id
-                    object.petId = petDoc.id
-                    object.petItems = petItemsList
-                    
-                })
-            );
-        }),
-    );
-    return object;
-}
 
 app.post('/addEntry', async (req, res) => {
     try {
@@ -658,7 +559,57 @@ app.post('/users/addCoins', async (req, res) => {
     }
 });
 
+app.put('/users/agreed/:userId', async (req, res) => {
+    try {
+        const db = getFirestore();
+        const userId = req.params.userId;
 
+        if (!userId) {
+            return res.status(400).json({
+                error: 'Missing required field',
+                message: 'User ID is required'
+            });
+        }
+
+        // Get the user document reference
+        const userRef = doc(db, 'users', userId);
+        
+        // Update the agreed field
+        await updateDoc(userRef, {
+            agreed: true
+        });
+
+        res.status(200).json({
+            message: 'User agreement updated successfully',
+            userId: userId,
+            agreed: true
+        });
+
+    } catch (error) {
+        console.error('Error updating user agreement:', error);
+        res.status(500).json({
+            error: 'Failed to update user agreement',
+            message: error.message
+        });
+    }
+});
+
+app.post('/users/:userId/pets', async (req, res) => {
+  const { userId } = req.params;
+  const { petId, petName } = req.body;
+
+  try {
+    const petDocRef = firestore.collection('users').doc(userId).collection('pets').doc(petId);
+
+    // Set the pet document with the provided pet name
+    await petDocRef.set({ name: petName });
+
+    res.status(201).send({ message: 'Pet added successfully!' });
+  } catch (error) {
+    console.error('Error adding pet:', error);
+    res.status(500).send({ error: 'Failed to add pet' });
+  }
+});
 
 app.listen(PORT, () => {
     console.log("Listening on port: " + PORT);
