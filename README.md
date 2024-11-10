@@ -19,4 +19,4 @@ Our application’s backend is primarily built with **Firebase**, **Javascript**
 ## ⭐ What's next for PetPals
 In the future, **PetPal** will introduce Pet Farm, a global feature where users can visit and gift each other’s pets, fostering community and kindness. We’ll also launch a **Google Extension**, allowing users to interact with their pets outside the website, keeping them engaged and connected across the browser. These features aim to enhance global interaction and support mental health through constant, positive engagement.
 
-## 💛 Thank you! - Team Mission Impossible #5VQE
+## 💛 Thank you! - Team Mission Possible #5VQE
