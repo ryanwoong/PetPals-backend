@@ -11,6 +11,7 @@ import { Item, itemConverter } from './classes/Item.js';
 import { Inventory, inventoryConverter } from './classes/Inventory.js';
 
 import { checkComment } from './util/checkComment.js';
+import { findTags } from './util/findTags.js';
 
 const PORT = 5100
 const app = express();
@@ -335,7 +336,7 @@ app.post('/addEntry', async (req, res) => {
         
         // Extract data from request body
         const { text, authorId, isPublic, title } = req.body;
-
+        
         // Validate required fields
         if (!text || !authorId) {
             return res.status(400).json({
@@ -344,22 +345,41 @@ app.post('/addEntry', async (req, res) => {
             });
         }
 
+        // Generate tags using findTags function
+        let tags = [];
+        try {
+            const tagsResponse = await findTags(text);
+            // Parse the JSON response
+            const tagsData = JSON.parse(tagsResponse);
+            
+            // Combine all tag categories into a single array
+            tags = [
+                ...tagsData.themes,
+                ...tagsData.topics,
+                ...tagsData.tones,
+                ...tagsData.target_audiences
+            ];
+        } catch (tagError) {
+            console.error('Error generating tags:', tagError);
+            // Continue with empty tags array if tag generation fails
+        }
+
         // Reference to the user's posts collection
         const postsCollectionRef = collection(
-            doc(db, 'users', authorId), 
+            doc(db, 'users', authorId),
             'posts'
         ).withConverter(postConverter);
-
+        
         const postId = crypto.randomUUID();
         
-        // Create new post object using the constructor properly
+        // Create new post object with generated tags
         const newPost = new Post(
             postId,           // id
             authorId,         // author
             title || '',      // title
             text,            // body
             new Date().toISOString(), // dateCreated
-            [],              // tags
+            tags,            // tags (now populated from analysis)
             isPublic         // isPublic
         );
 
@@ -370,9 +390,9 @@ app.post('/addEntry', async (req, res) => {
         res.status(201).json({
             message: 'Post created successfully',
             postId: docRef.id,
-            post: newPost
+            post: newPost,
+            generatedTags: tags // Include generated tags in response for transparency
         });
-
     } catch (error) {
         console.error('Error creating post:', error);
         res.status(500).json({
