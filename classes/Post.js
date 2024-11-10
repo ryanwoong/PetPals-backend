@@ -1,7 +1,8 @@
 class Post {
-    constructor(id, author, body, dateCreated, tags = [], isPublic = true) {
+    constructor(id, author, title, body, dateCreated, tags = [], isPublic = true) {
         this.id = id || null;
         this.author = author || null;
+        this.title = title || '';
         this.body = body || '';
         this.dateCreated = dateCreated || new Date().toISOString();
         this.tags = tags || [];
@@ -13,6 +14,7 @@ const postConverter = {
     toFirestore: (post) => ({
         id: post.id || null,
         author: post.author || null,
+        title: post.title || '',
         body: post.body || '',
         dateCreated: post.dateCreated || new Date().toISOString(),
         tags: post.tags || [],
@@ -23,6 +25,7 @@ const postConverter = {
         return new Post(
             data.id,
             data.author,
+            data.title,
             data.body,
             data.dateCreated,
             data.tags || [],
