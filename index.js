@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, addDoc, doc, setDoc } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, addDoc, doc, setDoc, getDoc } from 'firebase/firestore';
 import 'dotenv/config'
 import express from "express";
 import cors from "cors";
@@ -8,11 +8,10 @@ import { userConverter, User } from './classes/User.js';
 import { Pet, petConverter } from './classes/Pet.js';
 import { Post, postConverter } from './classes/Post.js';
 import { Item, itemConverter } from './classes/Item.js';
+import { Inventory, inventoryConverter } from './classes/Inventory.js';
 
-// Follow this pattern to import other Firebase services
-// import { } from 'firebase/<service>';
+import { checkComment } from './util/checkComment.js';
 
-// TODO: Replace the following with your app's Firebase project configuration
 const PORT = 5100
 const app = express();
 
@@ -26,76 +25,70 @@ const firebaseConfig = {
   
 };
 
+app.use(cors({
+    origin: '*', // Allow all origins
+    methods: ['GET', 'POST', 'OPTIONS'], // Allow these methods
+    allowedHeaders: ['Content-Type', 'Accept', 'Authorization'], // Allow these headers
+    credentials: true // Allow cookies and credentials
+}));
+
+
 const appDB = initializeApp(firebaseConfig);
 const db = getFirestore(appDB);
 const auth = getAuth(appDB);
 app.use(express.json());
-app.use(cors());
 
 app.post('/register', async (req, res) => {
     try {
-        
-
         const auth = getAuth();
         const db = getFirestore();
-
-        console.log(req.body)
-
+        // console.log(req.body);
         let username = req.body.username;
         let coins = req.body.coins;
-        let email = req.body.email
-        let level = req.body.level
-        let uid = req.body.uid
-        let xp = req.body.xp
-
+        let email = req.body.email;
+        let level = req.body.level;
+        let uid = req.body.uid;
+        let xp = req.body.xp;
 
         // Step 2: Create user document in Firestore
         const newUser = new User(username, coins, email, level, uid, xp);
         const userRef = doc(db, 'users', uid).withConverter(userConverter);
         await setDoc(userRef, newUser);
 
-        // Step 3: Create pets and their items
+        // Step 3: Create collections
         const petsCollectionRef = collection(userRef, 'pets').withConverter(petConverter);
         const postsCollectionRef = collection(userRef, 'posts').withConverter(postConverter);
+        const inventoryCollectionRef = collection(userRef, 'inventory').withConverter(inventoryConverter);
+
+        // Create the starter inventory item
+        const starterItem = new Inventory("egyc7nx9JjsUYlvK4OF6", 1); // ID and quantity
+        await addDoc(inventoryCollectionRef, starterItem);
 
         await Promise.all([
-        // Create pets and their items
-        ...petsData.map(async (petData) => {
-            const pet = new Pet(
-                petData.id, 
-                petData.level, 
-                petData.name, 
-                petData.type, 
-                petData.xp
-            );
-            const petRef = await addDoc(petsCollectionRef, pet);
-            
-            // Create items for each pet
-            const itemsCollectionRef = collection(petRef, 'items').withConverter(itemConverter);
-            await Promise.all(
-            itemData.map(async (itemData) => {
-                const item = new Item(
-                    itemData.id,
-                    itemData.name,
-                    itemData.cost,
-                    itemData.description
+            // Create pets and their items
+            ...petsData.map(async (petData) => {
+                const pet = new Pet(
+                    petData.id,
+                    petData.level,
+                    petData.name,
+                    petData.type,
+                    petData.xp
                 );
-                await addDoc(itemsCollectionRef, item);
+                const petRef = await addDoc(petsCollectionRef, pet);
+            }),
+
+            // Create posts if needed
+            ...(postsData || []).map(async (postData) => {
+                const post = new Post(
+                    postData.id,
+                    postData.author,
+                    postData.body,
+                    postData.dateCreated,
+                    postData.tags,
+                    postData.isPublic
+                );
+                await addDoc(postsCollectionRef, post);
             })
-            );
-        }),
-        
-        // Create posts
-        ...postsData.map(async (postData) => {
-            const post = new Post(
-                postData.id,
-                postData.author,
-                postData.body,
-                postData.dateCreated,
-                postData.tags
-            );
-            await addDoc(postsCollectionRef, post);
-        })
         ]);
 
         // Return success response
@@ -104,7 +97,6 @@ app.post('/register', async (req, res) => {
             uid: uid,
             user: newUser
         });
-
     } catch (error) {
         console.error('Registration error:', error);
         
@@ -113,30 +105,136 @@ app.post('/register', async (req, res) => {
         let errorMessage = 'Registration failed';
         
         switch (errorCode) {
-        case 'auth/email-already-in-use':
-            errorMessage = 'Email is already registered';
-            break;
-        case 'auth/invalid-email':
-            errorMessage = 'Invalid email address';
-            break;
-        case 'auth/operation-not-allowed':
-            errorMessage = 'Email/password accounts are not enabled';
-            break;
-        case 'auth/weak-password':
-            errorMessage = 'Password is too weak';
-            break;
-        default:
-            errorMessage = error.message;
+            case 'auth/email-already-in-use':
+                errorMessage = 'Email is already registered';
+                break;
+            case 'auth/invalid-email':
+                errorMessage = 'Invalid email address';
+                break;
+            case 'auth/operation-not-allowed':
+                errorMessage = 'Email/password accounts are not enabled';
+                break;
+            case 'auth/weak-password':
+                errorMessage = 'Password is too weak';
+                break;
+            default:
+                errorMessage = error.message;
         }
-
         res.status(400).json({
-        error: errorMessage,
-        code: errorCode
+            error: errorMessage,
+            code: errorCode
+        });
+    }
+});
+
+app.get('/inventory/:userId', async (req, res) => {
+    try {
+        const db = getFirestore();
+        const userId = req.params.userId;
+        console.log('Fetching inventory for user:', userId);
+
+        // 1. Get all documents from the user's inventory collection
+        const userInventoryRef = collection(db, 'users', userId, 'inventory');
+        const inventorySnapshot = await getDocs(userInventoryRef);
+        
+        const userInventory = [];
+        
+        // Get each inventory document
+        inventorySnapshot.forEach((doc) => {
+            console.log('Inventory document:', doc.data());
+            userInventory.push({
+                inventoryId: doc.id,
+                ...doc.data()
+            });
+        });
+
+        console.log('User inventory documents:', userInventory);
+
+        // 2. Get the item details for each inventory item
+        const itemPromises = userInventory.map(async (inventoryItem) => {
+            // Use id instead of itemId since that's how it's stored in your document
+            const itemRef = doc(db, 'items', inventoryItem.id);
+            const itemDoc = await getDoc(itemRef);
+            
+            if (itemDoc.exists()) {
+                const itemData = itemDoc.data();
+                return {
+                    id: inventoryItem.id,  // This is the item's ID from your items collection
+                    name: itemData.name,
+                    cost: itemData.cost,
+                    quantity: inventoryItem.quantity || 0,
+                    inventoryId: inventoryItem.inventoryId  // This is the document ID from the inventory collection
+                };
+            }
+            return null;
+        });
+
+        // Wait for all item details to be fetched
+        const inventoryWithDetails = (await Promise.all(itemPromises))
+            .filter(item => item !== null);
+
+        console.log('Inventory with item details:', inventoryWithDetails);
+
+        res.status(200).json({
+            inventory: inventoryWithDetails,
+            count: inventoryWithDetails.length
+        });
+
+    } catch (error) {
+        console.error('Error fetching inventory:', error);
+        res.status(500).json({
+            error: 'Failed to fetch inventory',
+            message: error.message
         });
     }
 });
 
 
+app.post('/checkComment', async (req, res) => {
+    console.log('Received comment check request');
+    
+    try {
+        // Validate request
+        if (!req.body) {
+            console.error('No request body received');
+            return res.status(400).json({
+                error: 'No request body provided',
+                safe: false
+            });
+        }
+
+        if (!req.body.commentBody) {
+            console.error('No comment body in request');
+            return res.status(400).json({
+                error: 'Comment body is required',
+                safe: false
+            });
+        }
+
+        console.log('Processing comment:', req.body.commentBody.substring(0, 50) + '...');
+
+        // Try to check the comment
+        const comment = req.body.commentBody;
+        const result = await checkComment(comment);
+        console.log('Check result:', result);
+
+        const isSafe = String(result).toLowerCase().trim() === "true";
+        console.log('Is comment safe:', isSafe);
+
+        // Send response
+        return res.status(200).json({
+            message: isSafe ? 'Comment is safe' : 'Comment contains inappropriate content',
+            safe: isSafe
+        });
+    } catch (error) {
+        console.error('Error processing comment:', error);
+        return res.status(500).json({
+            error: 'Failed to process comment',
+            details: error.message,
+            safe: false
+        });
+    }
+});
 
 
 // ########################################################################################
@@ -298,7 +396,7 @@ app.get('/posts/public', async (req, res) => {
             
             postsSnapshot.docs.forEach((postDoc) => {
                 const postData = postDoc.data();
-                console.log('Post data from Firestore:', postData); // Debug log
+                // console.log('Post data from Firestore:', postData); // Debug log
                 
                 // Only include public posts
                 if (postData.isPublic) {
@@ -316,7 +414,7 @@ app.get('/posts/public', async (req, res) => {
         }));
 
         // Log the final array
-        console.log('Sending posts to client:', publicPosts);
+        // console.log('Sending posts to client:', publicPosts);
 
         // Sort posts by date (newest first)
         publicPosts.sort((a, b) => {
@@ -469,113 +567,29 @@ app.get('/posts/:userId/:postId/comments', async (req, res) => {
     }
 });
 
-// ########################################################################################
+app.get('/shop/items', async (req, res) => {
+    try {
+        const db = getFirestore();
+        const itemsCol = collection(db, 'items');
+        const itemsSnapshot = await getDocs(itemsCol);
+        
+        const items = [];
+        itemsSnapshot.forEach((doc) => {
+            items.push({
+                id: doc.id,
+                title: doc.data().name,
+                price: doc.data().cost,
+                // Add any other fields you need
+            });
+        });
 
-// Authentication function examples
-// async function registerUser(db, email, username, uid, level = 1, coins = 0, xp = 0, petsData = [], postsData = []) {
-//     try {
-//         // Step 1: Register the user in Firebase Authentication
-//         // const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-//         // const uid = userCredential.user.uid;
-//         console.log("User registered:", uid);
+        res.status(200).json({ items });
+    } catch (error) {
+        console.error('Error fetching shop items:', error);
+        res.status(500).json({ error: 'Failed to fetch shop items' });
+    }
+});
 
-//         // Step 2: Initialize a User instance and save to Firestore with the converter
-//         const newUser = new User(username, coins, email, level, uid, xp);
-//         const userRef = doc(db, 'users', uid).withConverter(userConverter)
-//         await setDoc(userRef, newUser);
-
-//         // Step 3: Initialize each Pet and save to the 'pets' collection under the user
-//         const petsCollectionRef = collection(userRef, 'pets').withConverter(petConverter);
-//         const postsCollectionRef = collection(userRef, 'posts').withConverter(postConverter);
-
-//         await Promise.all(
-//             petsData.map(async (petData) => {
-//                 const pet = new Pet(petData.id, petData.level, petData.name, petData.type, petData.xp);
-//                 const petRef = await addDoc(petsCollectionRef, pet);
-
-//                 // Initialize each Item in the 'items' sub-collection within the pet document
-//                 const itemsCollectionRef = collection( petRef, 'items').withConverter(itemConverter);
-//                 await Promise.all(
-//                     itemData.map(async (itemData) => {
-//                         const item = new Item(itemData.id, itemData.name, itemData.cost, itemData.description);
-//                         await addDoc(itemsCollectionRef, item);
-//                     })
-//                 );
-//             }),
-
-//             postsData.map(async (postData) => {
-//                 const post = new Post(postData.id, postData.author, postData.body, postData.dateCreated, postData.tags);
-//                 await addDoc(postsCollectionRef, post);
-//             })
-//         );
-
-//         // Step 4: Initialize each Post and save to the 'posts' collection under the user
-//         // const postsCollectionRef = collection(userRef, 'posts').withConverter(postConverter);
-//         // await Promise.all(
-//         //     postsData.map(async (postData) => {
-//         //         const post = new Post(postData.id, postData.author, postData.body, postData.dateCreated, postData.tags);
-//         //         await addDoc(postsCollectionRef, post);
-//         //     })
-//         // );
-
-
-//         console.log('User, pets, and posts added successfully');
-//     } catch (error) {
-//         console.error("Error registering user or adding documents:", error.code, error.message);
-//     }
-// }
-  
-// async function signInUser(email, password) {
-//     try {
-//       const userCredential = await signInWithEmailAndPassword(auth, email, password);
-//       console.log("User signed in:", userCredential.user);
-//     } catch (error) {
-//       console.error("Error signing in user:", error.code, error.message);
-//     }
-// }
-
-
-// ########################################################################################
-
-// let data_1 = await getItems(db);
-// let data_2 = await getUsers(db);
-// let data_3 =  await getUserPets(db);
-// let data_4 =  await getUserPetItems(db);
-// let data_5 = await getUserPosts(db);
-// let data_6 = await getItems(db);
-// console.log(data_1);
-// console.log(data_2);
-// console.log(data_3);
-// console.log(data_4);
-// console.log(data_5);
-// console.log(data_6);
-
-const email = "johndoe@example.com";
-const password = "securePassword";
-const username = "JohnDoe";
-const level = 1;
-
-const petsData = [
-    { id: "123123", level: "3", name: "joey", type: "dog", xp: "432" },
-    { id: "456456", level: "2", name: "bella", type: "cat", xp: "210" }
-];
-
-const itemData = [
-    {id: "123123", name: "something", cost: "cost", description: "description"}
-];
-
-
-const postsData = [
-    { id: "543543", author: "1", body: "This is my first post!", dateCreated: "2023-01-01", tags: ["tag1", "tag2"], isPublic: "false" },
-    { id: "654654", author: "1", body: "Enjoying the day with my pets.", dateCreated: "2023-02-15", tags: ["tag3", "tag4"],isPublic: "false" }
-];
-
-// Call the function
-// registerUser(auth, db, email, password, username, level, 0, 0, petsData, postsData);
-
-// signInUser('johndoe@example.com', 'securePassword');
-
-// ########################################################################################
 
 
 app.listen(PORT, () => {
