@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, addDoc, doc, setDoc, getDoc } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, addDoc, doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
 import 'dotenv/config'
 import express from "express";
 import cors from "cors";
@@ -587,6 +587,54 @@ app.get('/shop/items', async (req, res) => {
     } catch (error) {
         console.error('Error fetching shop items:', error);
         res.status(500).json({ error: 'Failed to fetch shop items' });
+    }
+});
+
+app.post('/users/addCoins', async (req, res) => {
+    try {
+        const db = getFirestore();
+        const { userId, amount } = req.body;
+
+        if (!userId || amount === undefined) {
+            return res.status(400).json({
+                error: 'Missing required fields',
+                message: 'User ID and amount are required'
+            });
+        }
+
+        // Get the user document reference
+        const userRef = doc(db, 'users', userId);
+        const userDoc = await getDoc(userRef);
+
+        if (!userDoc.exists()) {
+            return res.status(404).json({
+                error: 'User not found',
+                message: 'No user found with the provided ID'
+            });
+        }
+
+        const userData = userDoc.data();
+        const currentCoins = userData.coins || 0;
+        const newCoins = currentCoins + amount;
+
+        // Update the user's coins
+        await updateDoc(userRef, {
+            coins: newCoins
+        });
+
+        res.status(200).json({
+            message: 'Coins updated successfully',
+            previousCoins: currentCoins,
+            newCoins: newCoins,
+            added: amount
+        });
+
+    } catch (error) {
+        console.error('Error updating user coins:', error);
+        res.status(500).json({
+            error: 'Failed to update user coins',
+            message: error.message
+        });
     }
 });
 
