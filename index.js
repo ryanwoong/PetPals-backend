@@ -599,7 +599,7 @@ app.post('/users/:userId/pets', async (req, res) => {
   const { petId, petName } = req.body;
 
   try {
-    const petDocRef = firestore.collection('users').doc(userId).collection('pets').doc(petId);
+    const petDocRef = db.collection('users').doc(userId).collection('pets').doc(petId);
 
     // Set the pet document with the provided pet name
     await petDocRef.set({ name: petName });
